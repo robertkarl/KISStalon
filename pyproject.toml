@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["kiss_talon*"]
 
+[tool.setuptools.package-data]
+kiss_talon = ["skill/SKILL.md"]
+
 [project]
 name = "kiss_talon"
 version = "0.1.0"

@@ -29,9 +29,20 @@ extra_flags = ""
 CRON_COMMENT = "# kiss_talon tick"
 
 
+def _resolve_binary() -> str:
+    """Return the absolute path to the kiss_talon binary.
+
+    Prefers the ~/.local/bin symlink (stable across pipx reinstalls)
+    over the resolved venv-internal path.
+    """
+    stable = Path.home() / ".local" / "bin" / "kiss_talon"
+    if stable.exists():
+        return str(stable)
+    return str(Path(sys.argv[0]).resolve())
+
+
 def _cron_line() -> str:
-    binary = shutil.which("kiss_talon") or sys.argv[0]
-    return f"*/10 * * * * {binary} tick"
+    return f"*/10 * * * * {_resolve_binary()} tick"
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -45,31 +56,38 @@ def cmd_init(args: argparse.Namespace) -> None:
     else:
         print(f"Config already exists: {CONFIG_PATH}")
 
-    # Add crontab entry
+    # Add/update crontab entry (idempotent — replaces stale paths)
     try:
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         existing = result.stdout if result.returncode == 0 else ""
     except FileNotFoundError:
         existing = ""
 
-    if "kiss_talon tick" not in existing:
-        cron_line = _cron_line()
-        new_crontab = existing.rstrip() + f"\n{CRON_COMMENT}\n{cron_line}\n"
-        subprocess.run(
-            ["crontab", "-"],
-            input=new_crontab,
-            text=True,
-            check=True,
-        )
-        print("Added crontab entry (every 10 minutes)")
+    cron_line = _cron_line()
+    # Strip any old kiss_talon lines
+    filtered = [
+        line for line in existing.splitlines()
+        if "kiss_talon" not in line
+    ]
+    new_crontab = "\n".join(filtered).rstrip() + f"\n{CRON_COMMENT}\n{cron_line}\n"
+    result = subprocess.run(
+        ["crontab", "-"],
+        input=new_crontab,
+        text=True,
+    )
+    if result.returncode == 0:
+        print(f"Crontab entry set: {cron_line}")
     else:
-        print("Crontab entry already exists")
+        print(f"WARNING: Failed to set crontab. You may need to grant cron access in System Settings.")
+        print(f"  Entry to add manually: {cron_line}")
 
-    # Install skill symlink
-    skill_src = Path(__file__).parent.parent / "skill" / "kiss_talon.md"
-    skill_dst = Path.home() / ".claude" / "skills" / "kiss_talon.md"
-    if skill_src.exists() and not skill_dst.exists():
+    # Install skill symlink (idempotent — replaces stale links)
+    skill_src = Path(__file__).parent / "skill"
+    skill_dst = Path.home() / ".claude" / "skills" / "kiss_talon"
+    if skill_src.exists():
         skill_dst.parent.mkdir(parents=True, exist_ok=True)
+        if skill_dst.is_symlink() or skill_dst.exists():
+            skill_dst.unlink()
         skill_dst.symlink_to(skill_src)
         print(f"Installed skill: {skill_dst}")
 
